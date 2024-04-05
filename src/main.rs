@@ -106,9 +106,11 @@ fn respond_with_public_recipes(sender: mpsc::UnboundedSender<ListResponse>, rece
             Ok(recipes) => {
                 let resp = ListResponse {
                     mode: ListMode::ALL,
-                    receiver,
+                    receiver: receiver.clone(),
                     data: recipes.into_iter().filter(|r| r.public).collect(),
                 };
+                info!("Responding with public recipes to {}", receiver);
+                
                 if let Err(e) = sender.send(resp) {
                     error!("error sending response via channel, {}", e);
                 }
@@ -123,16 +125,18 @@ impl NetworkBehaviourEventProcess<MdnsEvent> for RecipeBehaviour {
         match event {
             MdnsEvent::Discovered(discovered_list) => {
                 for (peer, _addr) in discovered_list {
+                    info!("Discovered new peer: {:?}", peer);
                     self.floodsub.add_node_to_partial_view(peer);
                 }
-            }
+            },
             MdnsEvent::Expired(expired_list) => {
                 for (peer, _addr) in expired_list {
+                    info!("Peer expired: {:?}", peer);
                     if !self.mdns.has_node(&peer) {
                         self.floodsub.remove_node_from_partial_view(&peer);
                     }
                 }
-            }
+            },
         }
     }
 }
@@ -152,13 +156,11 @@ async fn create_new_recipe(name: &str, ingredients: &str, instructions: &str) ->
     });
     write_local_recipes(&local_recipes).await?;
 
-    info!("Created recipe:");
-    info!("Name: {}", name);
-    info!("Ingredients: {}", ingredients);
-    info!("Instructions:: {}", instructions);
+    info!("Successfully created recipe with ID: {}, Name: {}", new_id, name);
 
     Ok(())
 }
+
 
 async fn publish_recipe(id: usize) -> Result<()> {
     let mut local_recipes = read_local_recipes().await?;
@@ -251,9 +253,12 @@ async fn main() {
                     cmd if cmd.starts_with("ls r") => handle_list_recipes(cmd, &mut swarm).await,
                     cmd if cmd.starts_with("create r") => handle_create_recipe(cmd).await,
                     cmd if cmd.starts_with("publish r") => handle_publish_recipe(cmd).await,
-                    _ => error!("unknown command"),
+                    cmd => {
+                        info!("Processing command: {}", cmd);
+                        error!("Unknown command");
+                    },
                 },
-            }
+                
         }
     }
 }
@@ -324,12 +329,12 @@ async fn handle_publish_recipe(cmd: &str) {
         match rest.trim().parse::<usize>() {
             Ok(id) => {
                 if let Err(e) = publish_recipe(id).await {
-                    info!("error publishing recipe with id {}, {}", id, e)
+                    error!("Error publishing recipe with ID {}: {}", id, e);
                 } else {
-                    info!("Published Recipe with id: {}", id);
+                    info!("Successfully published recipe with ID: {}", id);
                 }
             }
-            Err(e) => error!("invalid id: {}, {}", rest.trim(), e),
+            Err(e) => error!("Invalid ID '{}': {}", rest.trim(), e),
         };
     }
 }
